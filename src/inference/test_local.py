@@ -12,9 +12,16 @@ import json
 import time
 from pathlib import Path
 
+from src.inference.constants import (
+    DEFAULT_CALIBRATION_PATH,
+    DEFAULT_FIXED_THRESHOLD,
+    DEFAULT_MODEL_CONFIG_PATH,
+    FIXED_THRESHOLD_MODE,
+)
+from src.inference.io import ensure_file_exists, load_threshold_settings
+from src.inference.schema import build_local_case_result
 from src.models.speechbrain_verifier import SpeechBrainVerifier
 
-DEFAULT_THRESHOLD = 0.50
 DEFAULT_SAMPLES_DIR = Path("assets/demo_samples")
 
 
@@ -50,14 +57,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--config",
         type=Path,
-        default=Path("configs/model/ecapa.yaml"),
+        default=DEFAULT_MODEL_CONFIG_PATH,
         help="Model config YAML path",
+    )
+    parser.add_argument(
+        "--threshold-file",
+        type=Path,
+        default=DEFAULT_CALIBRATION_PATH,
+        help="Calibration JSON path (used when --threshold is not provided)",
     )
     parser.add_argument(
         "--threshold",
         type=float,
-        default=DEFAULT_THRESHOLD,
-        help="Temporary fixed threshold (default: 0.50)",
+        default=None,
+        help=(
+            "Temporary threshold override. If not set, load from calibration file "
+            f"(fallback {DEFAULT_FIXED_THRESHOLD:.2f})."
+        ),
     )
     parser.add_argument(
         "--json",
@@ -67,13 +83,8 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _ensure_file(path: Path, label: str) -> None:
-    if not path.is_file():
-        raise FileNotFoundError(f"{label} not found: {path}")
-
-
 def _discover_three_wavs(samples_dir: Path) -> tuple[Path, Path, Path]:
-    wavs = sorted(samples_dir.glob("*.wav"))
+    wavs = sorted(path for path in samples_dir.iterdir() if path.suffix.lower() == ".wav")
     if len(wavs) < 3:
         raise ValueError(
             f"Need at least 3 WAV files in {samples_dir}. "
@@ -99,37 +110,39 @@ def _run_case(
     start = time.perf_counter()
     score = verifier.score(enroll_path, test_path)
     latency_ms = (time.perf_counter() - start) * 1000.0
-    decision = score >= threshold
-    return {
-        "case": name,
-        "enroll": str(enroll_path),
-        "test": str(test_path),
-        "score": round(score, 6),
-        "threshold": round(threshold, 6),
-        "decision": decision,
-        "expected_decision": expected_decision,
-        "pass": decision == expected_decision,
-        "latency_ms": round(latency_ms, 3),
-    }
+    return build_local_case_result(
+        name=name,
+        enroll_path=str(enroll_path),
+        test_path=str(test_path),
+        score=score,
+        threshold=threshold,
+        latency_ms=latency_ms,
+        expected_decision=expected_decision,
+    )
 
 
 def main() -> int:
     args = parse_args()
-    _ensure_file(args.config, "Config file")
+    ensure_file_exists(args.config, "Config file")
 
     same_a, same_b, other = _resolve_paths(args)
-    _ensure_file(same_a, "same-a WAV")
-    _ensure_file(same_b, "same-b WAV")
-    _ensure_file(other, "other WAV")
+    ensure_file_exists(same_a, "same-a WAV")
+    ensure_file_exists(same_b, "same-b WAV")
+    ensure_file_exists(other, "other WAV")
 
     verifier = SpeechBrainVerifier(config_path=args.config)
+    if args.threshold is None:
+        threshold, threshold_mode = load_threshold_settings(args.threshold_file)
+    else:
+        threshold = args.threshold
+        threshold_mode = FIXED_THRESHOLD_MODE
 
     cases = [
         _run_case(
             verifier=verifier,
             enroll_path=same_a,
             test_path=same_b,
-            threshold=args.threshold,
+            threshold=threshold,
             expected_decision=True,
             name="same_speaker",
         ),
@@ -137,7 +150,7 @@ def main() -> int:
             verifier=verifier,
             enroll_path=same_a,
             test_path=other,
-            threshold=args.threshold,
+            threshold=threshold,
             expected_decision=False,
             name="different_speaker",
         ),
@@ -149,8 +162,8 @@ def main() -> int:
             "passed": passed,
             "cases_passed": sum(1 for c in cases if c["pass"]),
             "cases_total": len(cases),
-            "threshold_mode": "fixed",
-            "threshold": round(args.threshold, 6),
+            "threshold_mode": threshold_mode,
+            "threshold": round(threshold, 6),
             "model_name": verifier.config.model_name,
             "sample_rate": verifier.config.sample_rate,
             "message": (
@@ -167,7 +180,7 @@ def main() -> int:
     else:
         print("Local Smoke Test")
         print(f"Model: {verifier.config.model_name}")
-        print(f"Threshold (fixed): {args.threshold:.2f}")
+        print(f"Threshold ({threshold_mode}): {threshold:.2f}")
         print("-" * 64)
         for case in cases:
             status = "PASS" if case["pass"] else "FAIL"
