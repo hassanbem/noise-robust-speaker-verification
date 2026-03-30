@@ -4,3 +4,4 @@ speechbrain
 mlflow
 fastapi
 uvicorn
+python-multipart
