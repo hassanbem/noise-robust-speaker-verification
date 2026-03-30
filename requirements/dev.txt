@@ -1,0 +1,6 @@
+-r data.txt
+-r model.txt
+-r ui.txt
+pytest
+black
+ruff

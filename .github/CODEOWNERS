@@ -1,0 +1,27 @@
+# Replace @student2 and @student3 with real GitHub usernames before enabling required code-owner review.
+# @hassanbem is currently the repo owner, maintainer, and Student 1.
+
+/src/data/              @hassanbem
+/src/eval/              @hassanbem
+/data/manifests/        @hassanbem
+/results/ablation/      @hassanbem
+/results/tables/        @hassanbem
+
+/src/models/            @student2
+/src/inference/         @student2
+/src/api/               @student2
+/configs/model/         @student2
+/configs/api/           @student2
+/artifacts/calibration/ @student2
+
+/src/ui/                @student3
+/assets/                @student3
+/configs/ui/            @student3
+
+/docs/api_contract.md   @student2 @student3
+/README.md              @hassanbem
+/.github/               @hassanbem
+/requirements/          @hassanbem
+/docs/decisions.md      @hassanbem
+/Makefile               @hassanbem
+/pyproject.toml         @hassanbem
