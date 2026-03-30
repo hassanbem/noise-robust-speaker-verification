@@ -1,0 +1,5 @@
+model_name: "speechbrain/spkrec-ecapa-voxceleb"
+sample_rate: 16000
+device: "cpu"
+score_method: "cosine"
+normalize_audio: true
