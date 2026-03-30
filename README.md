@@ -3,7 +3,7 @@
 A 3-student machine learning and audio systems project for building a speaker verification pipeline that stays reliable under noisy conditions.
 
 ## Team Roles
-- Student 1 (`@hassanbem`): data pipeline, manifests, evaluation, ablations
+- Student 1 : data pipeline, manifests, evaluation, ablations
 - Student 2: models, inference, calibration, API
 - Student 3: UI, demo assets, Gradio integration
 
