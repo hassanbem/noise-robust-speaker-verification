@@ -1,28 +1,58 @@
 # API Contract
 
-## POST /verify
+## Goal
+This contract defines how the backend and UI communicate.
 
-### Request
-- `enroll_audio_path` or uploaded audio
-- `test_audio_path` or uploaded audio
-- `threshold_mode`: `"eer"` | `"far_1"`
-- `enhancement`: `true` | `false`
+---
 
-### Response
+## Verification flow
+
+### Inputs
+The backend receives:
+- enrollment audio
+- test audio
+- threshold mode
+- enhancement mode
+
+### Output
+The backend returns a JSON object in this format:
+
 ```json
 {
   "score": 0.73,
   "threshold": 0.61,
   "decision": true,
+  "decision_label": "same speaker",
   "latency_ms": 118,
-  "noise_type": "street",
-  "snr_db": 5,
+  "model_name": "speechbrain/spkrec-ecapa-voxceleb",
+  "sample_rate": 16000,
   "enhancement": false,
-  "model_name": "speechbrain-ecapa"
+  "threshold_mode": "fixed",
+  "message": "verification completed successfully"
 }
 ```
 
-### Notes
-- Student 2 owns the backend implementation of this contract.
-- Student 3 can build the UI against this response shape before the real model is ready.
-- Local file paths are acceptable for development; uploaded files can replace them later.
+---
+
+## Fields meaning
+
+- `score`: cosine similarity score between enrollment and test audio
+- `threshold`: threshold used for decision
+- `decision`: boolean result
+- `decision_label`: human-readable decision
+- `latency_ms`: total inference time in milliseconds
+- `model_name`: model identifier
+- `sample_rate`: processed sample rate
+- `enhancement`: whether enhancement was applied
+- `threshold_mode`: fixed / eer / far_1
+- `message`: backend status text
+
+---
+
+## Temporary rule during development
+Until calibration is implemented, backend uses:
+
+- `threshold = 0.50`
+- `threshold_mode = "fixed"`
+
+This will be replaced later by a calibrated threshold JSON file.
