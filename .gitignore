@@ -30,6 +30,8 @@ data/processed/*
 !data/processed/.gitkeep
 data/external/*
 !data/external/.gitkeep
+data/augmented/
+data/noise_sources/
 
 # Experiment outputs
 mlruns/
@@ -39,6 +41,9 @@ logs/
 tmp/
 results/tmp/*
 !results/tmp/.gitkeep
+results/figures/debug_*.png
+results/tables/debug_*.csv
+results/scores/debug_*.csv
 
 # Model checkpoints
 checkpoints/

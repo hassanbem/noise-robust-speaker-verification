@@ -2,3 +2,5 @@
 librosa
 torchaudio
 audiomentations
+matplotlib
+scikit-learn
