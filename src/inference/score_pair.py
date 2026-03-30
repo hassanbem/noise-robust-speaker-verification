@@ -7,9 +7,14 @@ import json
 import time
 from pathlib import Path
 
+from src.inference.constants import (
+    DEFAULT_CALIBRATION_PATH,
+    DEFAULT_MODEL_CONFIG_PATH,
+    FIXED_THRESHOLD_MODE,
+)
+from src.inference.io import ensure_file_exists, load_threshold_settings
+from src.inference.schema import VerificationResponse, build_verification_response
 from src.models.speechbrain_verifier import SpeechBrainVerifier
-
-DEFAULT_THRESHOLD = 0.50
 
 
 def parse_args() -> argparse.Namespace:
@@ -22,50 +27,76 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--config",
         type=Path,
-        default=Path("configs/model/ecapa.yaml"),
+        default=DEFAULT_MODEL_CONFIG_PATH,
         help="Model config YAML path",
+    )
+    parser.add_argument(
+        "--threshold-file",
+        type=Path,
+        default=DEFAULT_CALIBRATION_PATH,
+        help="Calibration JSON path (used when --threshold is not provided)",
     )
     parser.add_argument(
         "--threshold",
         type=float,
-        default=DEFAULT_THRESHOLD,
-        help="Decision threshold (temporary fixed threshold, default: 0.50)",
+        default=None,
+        help="Decision threshold override (temporary fixed threshold)",
     )
     return parser.parse_args()
 
 
-def _ensure_file(path: Path, label: str) -> None:
-    """Fail fast if a required file is missing."""
-    if not path.is_file():
-        raise FileNotFoundError(f"{label} file not found: {path}")
+def resolve_threshold(
+    *, threshold_override: float | None, threshold_file: Path
+) -> tuple[float, str]:
+    """Resolve threshold/mode from CLI override or calibration JSON."""
+    if threshold_override is not None:
+        return threshold_override, FIXED_THRESHOLD_MODE
+    return load_threshold_settings(threshold_file)
+
+
+def score_pair_response(
+    *,
+    verifier: SpeechBrainVerifier,
+    enroll_path: Path,
+    test_path: Path,
+    threshold: float,
+    threshold_mode: str,
+) -> VerificationResponse:
+    """Return one contract-aligned score response for an audio pair."""
+    ensure_file_exists(enroll_path, "Enrollment audio")
+    ensure_file_exists(test_path, "Test audio")
+
+    start = time.perf_counter()
+    score = verifier.score(enroll_path, test_path)
+    latency_ms = (time.perf_counter() - start) * 1000.0
+
+    return build_verification_response(
+        score=score,
+        threshold=threshold,
+        latency_ms=latency_ms,
+        model_name=verifier.config.model_name,
+        sample_rate=verifier.config.sample_rate,
+        threshold_mode=threshold_mode,
+    )
 
 
 def main() -> int:
     """Run CLI workflow and print JSON response."""
     args = parse_args()
-    _ensure_file(args.enroll, "Enrollment audio")
-    _ensure_file(args.test, "Test audio")
-    _ensure_file(args.config, "Config")
+    ensure_file_exists(args.config, "Config")
 
     verifier = SpeechBrainVerifier(config_path=args.config)
-
-    start = time.perf_counter()
-    score = verifier.score(args.enroll, args.test)
-    latency_ms = (time.perf_counter() - start) * 1000.0
-
-    decision = score >= args.threshold
-    response = {
-        "score": round(score, 6),
-        "threshold": round(args.threshold, 6),
-        "decision": decision,
-        "decision_label": "same speaker" if decision else "different speaker",
-        "latency_ms": round(latency_ms, 3),
-        "model_name": verifier.config.model_name,
-        "sample_rate": verifier.config.sample_rate,
-        "enhancement": False,
-        "threshold_mode": "fixed",
-        "message": "scoring completed successfully",
-    }
+    threshold, threshold_mode = resolve_threshold(
+        threshold_override=args.threshold,
+        threshold_file=args.threshold_file,
+    )
+    response = score_pair_response(
+        verifier=verifier,
+        enroll_path=args.enroll,
+        test_path=args.test,
+        threshold=threshold,
+        threshold_mode=threshold_mode,
+    )
     print(json.dumps(response, indent=2))
     return 0
 

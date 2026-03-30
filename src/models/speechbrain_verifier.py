@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
+from tempfile import gettempdir
 
+import soundfile as sf
 import torch
 import torch.nn.functional as F
 import torchaudio
 import yaml
-import soundfile as sf
 
 
 @dataclass(frozen=True)
@@ -42,6 +44,14 @@ def _ensure_speechbrain_torchaudio_compat() -> None:
         torchaudio.list_audio_backends = lambda: []  # type: ignore[attr-defined]
 
 
+def _resolve_speechbrain_savedir() -> Path:
+    """Resolve model cache dir outside the repo to avoid uvicorn reload loops."""
+    override = os.getenv("SPEECHBRAIN_CACHE_DIR")
+    if override:
+        return Path(override).expanduser().resolve()
+    return (Path(gettempdir()) / "noise_robust_sv" / "speechbrain_ecapa").resolve()
+
+
 class SpeechBrainVerifier:
     """Thin wrapper around SpeechBrain ECAPA embeddings + cosine scoring."""
 
@@ -57,9 +67,11 @@ class SpeechBrainVerifier:
         from speechbrain.inference.speaker import EncoderClassifier
 
         self.device = torch.device(self.config.device)
+        savedir = _resolve_speechbrain_savedir()
+        savedir.mkdir(parents=True, exist_ok=True)
         self.model = EncoderClassifier.from_hparams(
             source=self.config.model_name,
-            savedir=str(Path("artifacts/model/speechbrain_ecapa").resolve()),
+            savedir=str(savedir),
             run_opts={"device": str(self.device)},
         )
 
@@ -99,8 +111,16 @@ class SpeechBrainVerifier:
         test = F.normalize(test_embedding.view(1, -1), dim=1)
         return float(torch.sum(enroll * test, dim=1).item())
 
+    def score_embeddings(
+        self, enroll_embedding: torch.Tensor, test_embedding: torch.Tensor
+    ) -> float:
+        """Score a pair of embeddings with the configured scoring method."""
+        if self.config.score_method == "cosine":
+            return self.cosine_score(enroll_embedding, test_embedding)
+        raise ValueError(f"Unsupported score method: {self.config.score_method}")
+
     def score(self, enroll_audio_path: str | Path, test_audio_path: str | Path) -> float:
         """End-to-end score from two audio files."""
         enroll_embedding = self.embed(enroll_audio_path)
         test_embedding = self.embed(test_audio_path)
-        return self.cosine_score(enroll_embedding, test_embedding)
+        return self.score_embeddings(enroll_embedding, test_embedding)

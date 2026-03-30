@@ -1,0 +1,7 @@
+{
+  "threshold": 0.5,
+  "threshold_mode": "fixed",
+  "target_far": null,
+  "source": "phase1_default",
+  "notes": "Temporary fixed threshold for Phase 1. Replace with calibrated threshold in Phase 2."
+}
