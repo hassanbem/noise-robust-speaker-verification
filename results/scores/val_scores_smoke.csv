@@ -1,0 +1,3 @@
+enroll_path,test_path,label,noise_type,snr_db,speaker_id_enroll,speaker_id_test,split,score,threshold,decision,decision_label,latency_ms,model_name,sample_rate,enhancement,threshold_mode,message
+data/processed/enrollment/val/spk001_enroll_full.wav,data/processed/spk001/verify_clean_01.wav,1,clean,,spk001,spk001,val,0.727612,0.5,True,same speaker,2712,speechbrain/spkrec-ecapa-voxceleb,16000,False,fixed,verification completed successfully
+data/processed/enrollment/val/spk001_enroll_full.wav,data/processed/spk001/verify_clean_02.wav,1,clean,,spk001,spk001,val,0.827825,0.5,True,same speaker,2454,speechbrain/spkrec-ecapa-voxceleb,16000,False,fixed,verification completed successfully

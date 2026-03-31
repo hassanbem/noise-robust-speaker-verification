@@ -1,4 +1,4 @@
-"""HTTP client utilities for the Gradio UI."""
+"""Simple HTTP client for the Gradio speaker-verification UI."""
 
 from __future__ import annotations
 
@@ -7,10 +7,10 @@ from typing import Any
 
 import requests
 
-VERIFY_API_URL = "http://127.0.0.1:8000/verify"
+DEFAULT_VERIFY_URL = "http://127.0.0.1:8000/verify"
 REQUEST_TIMEOUT_SECONDS = 30
 
-RESPONSE_FIELDS = (
+REQUIRED_RESPONSE_FIELDS = (
     "score",
     "threshold",
     "decision",
@@ -28,42 +28,38 @@ class APIClientError(RuntimeError):
     """Raised when backend verification request fails."""
 
 
-def _normalize_response(payload: dict[str, Any]) -> dict[str, Any]:
-    missing = [field for field in RESPONSE_FIELDS if field not in payload]
-    if missing:
-        raise APIClientError(
-            f"Backend response is missing required fields: {', '.join(missing)}"
-        )
+def _ensure_file(path_value: str | Path | None, label: str) -> Path:
+    if path_value is None:
+        raise FileNotFoundError(f"{label} file is missing.")
 
-    return {
-        "score": float(payload["score"]),
-        "threshold": float(payload["threshold"]),
-        "decision": bool(payload["decision"]),
-        "decision_label": str(payload["decision_label"]),
-        "latency_ms": int(payload["latency_ms"]),
-        "model_name": str(payload["model_name"]),
-        "sample_rate": int(payload["sample_rate"]),
-        "enhancement": bool(payload["enhancement"]),
-        "threshold_mode": str(payload["threshold_mode"]),
-        "message": str(payload["message"]),
-    }
+    path = Path(path_value)
+    if not path.is_file():
+        raise FileNotFoundError(f"{label} file not found: {path}")
+    return path
+
+
+def _validate_payload(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise APIClientError("Backend JSON response must be an object.")
+
+    missing = [name for name in REQUIRED_RESPONSE_FIELDS if name not in payload]
+    if missing:
+        missing_text = ", ".join(missing)
+        raise APIClientError(f"Backend response is missing required fields: {missing_text}")
+
+    return {name: payload[name] for name in REQUIRED_RESPONSE_FIELDS}
 
 
 def verify_with_api(
     enroll_audio_path: str | Path,
     test_audio_path: str | Path,
     enhancement: bool = False,
-    verify_api_url: str = VERIFY_API_URL,
+    verify_api_url: str = DEFAULT_VERIFY_URL,
     timeout_seconds: int = REQUEST_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
-    """Send multipart verification request to FastAPI backend."""
-    enroll_path = Path(enroll_audio_path)
-    test_path = Path(test_audio_path)
-
-    if not enroll_path.is_file():
-        raise FileNotFoundError(f"Enrollment audio file not found: {enroll_path}")
-    if not test_path.is_file():
-        raise FileNotFoundError(f"Test audio file not found: {test_path}")
+    """Call POST /verify with multipart audio files and return backend JSON."""
+    enroll_path = _ensure_file(enroll_audio_path, "Enrollment audio")
+    test_path = _ensure_file(test_audio_path, "Test audio")
 
     try:
         with enroll_path.open("rb") as enroll_file, test_path.open("rb") as test_file:
@@ -77,18 +73,24 @@ def verify_with_api(
                 timeout=timeout_seconds,
             )
             response.raise_for_status()
-    except requests.RequestException as exc:
+    except requests.Timeout as exc:
         raise APIClientError(
-            f"Could not reach backend at {verify_api_url}. "
-            "Make sure FastAPI server is running."
+            f"Backend request timed out after {timeout_seconds}s. URL: {verify_api_url}"
         ) from exc
+    except requests.ConnectionError as exc:
+        raise APIClientError(
+            f"Cannot connect to backend at {verify_api_url}. Is FastAPI running?"
+        ) from exc
+    except requests.HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else "unknown"
+        detail = exc.response.text if exc.response is not None else str(exc)
+        raise APIClientError(f"Backend returned HTTP {status}: {detail}") from exc
+    except requests.RequestException as exc:
+        raise APIClientError(f"Backend request failed: {exc}") from exc
 
     try:
         payload = response.json()
     except ValueError as exc:
         raise APIClientError("Backend returned invalid JSON response.") from exc
 
-    if not isinstance(payload, dict):
-        raise APIClientError("Backend JSON response must be an object.")
-
-    return _normalize_response(payload)
+    return _validate_payload(payload)

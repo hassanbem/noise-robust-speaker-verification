@@ -54,13 +54,14 @@ The backend returns a JSON object in this format:
 
 ---
 
-## Temporary rule during development
-Until calibration is implemented, backend uses:
+## Threshold loading policy
+Backend threshold source order:
 
-- `threshold = 0.50`
-- `threshold_mode = "fixed"`
+1. `artifacts/calibration/threshold.json` (calibrated threshold, preferred)
+2. `artifacts/calibration/fixed_threshold.json` (legacy fixed fallback)
+3. internal fallback (`threshold=0.50`, `threshold_mode="fixed"`) if files are missing
 
-This will be replaced later by a calibrated threshold JSON file.
+This keeps `/verify` stable for UI usage while enabling calibrated deployment.
 
 ---
 
@@ -81,7 +82,7 @@ Response:
 
 Behavior:
 - receives enrollment and test audio files
-- loads threshold from calibration JSON (or fixed fallback)
+- loads threshold using the policy above
 - computes similarity score and decision
 - returns the contract JSON shown above
 

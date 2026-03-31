@@ -2,12 +2,11 @@
 
 Tell Student 3 this exactly:
 
-Start the UI now using the API contract in docs/api_contract.md.
-Do not wait for the real backend.
-Build the Gradio interface using a fake backend function that returns the same JSON structure.
+Start the backend first, then run the UI against the real `/verify` API.
+Use the contract in `docs/api_contract.md`.
 
 ## Scope (UI only)
-- UI files only: `src/ui/gradio_app.py`, `src/ui/mock_backend.py`
+- UI files only: `src/ui/gradio_app.py`, `src/ui/api_client.py`
 - No backend edits
 - No model/inference/evaluation edits
 
@@ -16,6 +15,11 @@ Build the Gradio interface using a fake backend function that returns the same J
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements/ui.txt
+python -m pip install -r requirements/model.txt
+python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000
+
+# in a new terminal
+.\.venv\Scripts\Activate.ps1
 python -m src.ui.gradio_app
 ```
 
@@ -26,5 +30,5 @@ python -m src.ui.gradio_app
 4. Present score, threshold, decision, latency, and JSON contract output.
 
 ## Notes
-- This app is intentionally wired to a fake backend contract first.
-- Student 3 can swap the fake function with real API calls once backend stabilizes.
+- Verify API URL defaults to `http://127.0.0.1:8000/verify`.
+- You can override it from the UI textbox if backend runs on another host/port.
