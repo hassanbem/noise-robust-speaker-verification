@@ -24,9 +24,6 @@ dist/
 *.egg-info/
 
 # Data (keep folders, ignore contents)
-data/raw/*
-!data/raw/.gitkeep
-data/processed/*
 !data/processed/.gitkeep
 data/external/*
 !data/external/.gitkeep
