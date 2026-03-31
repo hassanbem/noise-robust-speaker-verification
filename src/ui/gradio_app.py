@@ -1,230 +1,152 @@
-"""Gradio demo app for Student 3.
-
-This UI uses a fake backend contract first and can later be wired to a real
-FastAPI endpoint.
-"""
+"""Minimal Gradio UI for FastAPI speaker verification backend."""
 
 from __future__ import annotations
 
 from pathlib import Path
-import json
 
 import gradio as gr
 
-from src.ui.mock_backend import fake_verify
-
-ENROLLMENTS: dict[str, str] = {}
-
-
-def _speaker_choices() -> list[str]:
-    return sorted(ENROLLMENTS.keys())
+try:
+    from src.ui.api_client import APIClientError, verify_with_api
+except ModuleNotFoundError:  # Allows: python src/ui/gradio_app.py
+    from api_client import APIClientError, verify_with_api  # type: ignore[no-redef]
 
 
-def enroll_speaker(speaker_name: str, enrollment_audio: str | None):
-    """Store enrollment audio path in local memory for demo flow."""
-    speaker_name = (speaker_name or "").strip()
-    if not speaker_name:
-        return "Please enter a speaker name.", gr.update(choices=_speaker_choices())
-    if not enrollment_audio:
-        return "Please record or upload enrollment audio.", gr.update(choices=_speaker_choices())
-
-    audio_path = Path(enrollment_audio)
-    if not audio_path.exists():
-        return "Enrollment audio file does not exist.", gr.update(choices=_speaker_choices())
-
-    ENROLLMENTS[speaker_name] = str(audio_path)
-    status = f"Enrollment saved for '{speaker_name}' ({audio_path.name})."
-    return status, gr.update(choices=_speaker_choices(), value=speaker_name)
-
-
-def refresh_speakers():
-    return gr.update(choices=_speaker_choices())
-
-
-def verify_speaker(
-    speaker_name: str,
-    test_audio: str | None,
-    noise_type: str,
-    snr_db: int,
-    enhancement: bool,
-    threshold_mode: str,
-):
-    """Run mock verification and expose contract fields in the UI."""
-    if not speaker_name:
-        return (
-            "<div style='padding:10px;border-radius:8px;background:#fff3cd;color:#664d03;'>Choose an enrolled speaker first.</div>",
-            0.0,
-            0.0,
-            "N/A",
-            0,
-            "none",
-            0,
-            "{}",
-        )
-    if not test_audio:
-        return (
-            "<div style='padding:10px;border-radius:8px;background:#fff3cd;color:#664d03;'>Provide a test audio sample.</div>",
-            0.0,
-            0.0,
-            "N/A",
-            0,
-            "none",
-            0,
-            "{}",
-        )
-    if speaker_name not in ENROLLMENTS:
-        return (
-            "<div style='padding:10px;border-radius:8px;background:#f8d7da;color:#842029;'>Selected speaker has no enrollment yet.</div>",
-            0.0,
-            0.0,
-            "N/A",
-            0,
-            "none",
-            0,
-            "{}",
-        )
-
-    response = fake_verify(
-        enroll_path=ENROLLMENTS[speaker_name],
-        test_path=test_audio,
-        threshold_mode=threshold_mode,
-        enhancement=enhancement,
-    )
-
-    if response["decision"]:
-        card = "<div style='padding:10px;border-radius:8px;background:#d1e7dd;color:#0f5132;font-weight:700;'>ACCEPT: same speaker</div>"
+def _decision_badge(decision: bool | None) -> str:
+    if decision is True:
+        title = "ACCEPTED"
+        subtitle = "Same Speaker"
+        bg = "#d1e7dd"
+        fg = "#0f5132"
+    elif decision is False:
+        title = "REJECTED"
+        subtitle = "Different Speaker"
+        bg = "#f8d7da"
+        fg = "#842029"
     else:
-        card = "<div style='padding:10px;border-radius:8px;background:#f8d7da;color:#842029;font-weight:700;'>REJECT: different speaker</div>"
+        title = "NO RESULT"
+        subtitle = "Run verification to see decision"
+        bg = "#e2e3e5"
+        fg = "#41464b"
 
     return (
-        card,
-        response["score"],
-        response["threshold"],
-        response["decision_label"],
-        response["latency_ms"],
-        noise_type,
-        snr_db,
-        json.dumps(response, indent=2),
+        f"<div style='padding:18px;border-radius:10px;background:{bg};color:{fg};"
+        "text-align:center;border:1px solid rgba(0,0,0,0.08);'>"
+        f"<div style='font-size:28px;font-weight:800;line-height:1.15;'>{title}</div>"
+        f"<div style='font-size:18px;font-weight:600;margin-top:4px;'>{subtitle}</div>"
+        "</div>"
     )
 
 
-def build_about_markdown() -> str:
-    lines = [
-        "### About This Demo",
-        "- Model (contract): SpeechBrain ECAPA-TDNN",
-        "- Input expectation: mono 16 kHz audio",
-        "- Verification score: cosine similarity",
+def _empty_result(status: str) -> tuple[str, str, str, float, float, int, str, str]:
+    return (
+        status,
+        _decision_badge(None),
         "",
-        "### Metric quick guide",
-        "- EER: equal error rate where FAR equals FRR.",
-        "- FAR: false acceptance rate (impostor accepted).",
-        "- FRR: false rejection rate (genuine speaker rejected).",
-    ]
+        0.0,
+        0.0,
+        0,
+        "",
+        "",
+    )
 
-    ablation_file = Path("results/ablation/noise_ablation.csv")
-    if ablation_file.exists():
-        lines += ["", f"Noise ablation table found: `{ablation_file}`"]
-    else:
-        lines += ["", "Noise ablation table not found yet (expected later from Student 1)."]
 
-    return "\n".join(lines)
+def on_verify(
+    enroll_audio_path: str | None,
+    verification_audio_path: str | None,
+    enhancement: bool,
+) -> tuple[str, str, str, float, float, int, str, str]:
+    """Validate inputs, call backend API, and format UI outputs."""
+    if not enroll_audio_path:
+        return _empty_result("Missing enrollment audio.")
+    if not verification_audio_path:
+        return _empty_result("Missing verification audio.")
+
+    enroll_path = Path(enroll_audio_path)
+    verification_path = Path(verification_audio_path)
+
+    if not enroll_path.is_file():
+        return _empty_result(f"Missing enrollment audio file: {enroll_path}")
+    if not verification_path.is_file():
+        return _empty_result(f"Missing verification audio file: {verification_path}")
+
+    try:
+        payload = verify_with_api(
+            enroll_audio_path=enroll_path,
+            test_audio_path=verification_path,
+            enhancement=enhancement,
+        )
+    except (APIClientError, FileNotFoundError) as exc:
+        error_text = str(exc)
+        lowered = error_text.lower()
+        if "cannot connect" in lowered or "timed out" in lowered:
+            status = f"Backend unavailable. {error_text}"
+        else:
+            status = f"Verification failed. {error_text}"
+        return _empty_result(status)
+
+    status = "Backend connected. Verification completed."
+    decision = bool(payload["decision"])
+    return (
+        status,
+        _decision_badge(decision),
+        str(payload["decision_label"]),
+        float(payload["score"]),
+        float(payload["threshold"]),
+        int(payload["latency_ms"]),
+        str(payload["model_name"]),
+        str(payload["message"]),
+    )
 
 
 def build_demo() -> gr.Blocks:
-    with gr.Blocks(title="Noise-Robust Speaker Verification Demo") as demo:
+    with gr.Blocks(title="Noise-Robust Speaker Verification") as demo:
         gr.Markdown(
-            "# Speaker Verification Demo (Student 3)\n"
-            "Uses a fake backend function that follows `docs/api_contract.md`."
+            "# Noise-Robust Speaker Verification\n"
+            "Upload or record an enrollment clip and a verification clip, then compare "
+            "them using the local speaker verification backend."
         )
 
-        with gr.Tab("Enroll"):
-            speaker_name = gr.Textbox(label="Speaker name", placeholder="e.g. speaker_01")
-            enrollment_audio = gr.Audio(
-                label="Enrollment audio (upload or record)",
+        with gr.Row():
+            enroll_audio = gr.Audio(
+                label="Enrollment Audio",
                 sources=["upload", "microphone"],
                 type="filepath",
             )
-            enroll_btn = gr.Button("Save Enrollment", variant="primary")
-            enroll_status = gr.Textbox(label="Status", interactive=False)
-
-        with gr.Tab("Verify"):
-            with gr.Row():
-                verify_speaker_name = gr.Dropdown(
-                    label="Enrolled speaker",
-                    choices=_speaker_choices(),
-                )
-                refresh_btn = gr.Button("Refresh speakers")
-
-            test_audio = gr.Audio(
-                label="Test audio (upload or record)",
+            verification_audio = gr.Audio(
+                label="Verification Audio",
                 sources=["upload", "microphone"],
                 type="filepath",
             )
 
-            with gr.Row():
-                noise_type = gr.Dropdown(
-                    label="Noise mode",
-                    choices=["clean", "music", "speech", "noise", "street", "call_center"],
-                    value="clean",
-                )
-                snr_db = gr.Slider(label="SNR (dB)", minimum=-5, maximum=15, value=5, step=5)
+        enhancement = gr.Checkbox(label="Enhancement", value=False)
+        verify_button = gr.Button("Verify", variant="primary")
 
-            with gr.Row():
-                threshold_mode = gr.Radio(
-                    label="Threshold mode",
-                    choices=["fixed", "eer", "far_1"],
-                    value="fixed",
-                )
-                enhancement = gr.Checkbox(label="Enhancement enabled", value=False)
+        status = gr.Textbox(label="Status / Error", interactive=False)
+        decision_badge = gr.HTML(value=_decision_badge(None), label="Decision")
 
-            verify_btn = gr.Button("Verify", variant="primary")
-            decision_card = gr.HTML()
+        with gr.Row():
+            decision_label = gr.Textbox(label="Decision", interactive=False)
+            score = gr.Number(label="Score", interactive=False)
+            threshold = gr.Number(label="Threshold", interactive=False)
+            latency_ms = gr.Number(label="Latency (ms)", interactive=False)
 
-            with gr.Row():
-                score = gr.Number(label="Similarity score")
-                threshold = gr.Number(label="Threshold")
-                decision_label = gr.Textbox(label="Decision label")
-                latency_ms = gr.Number(label="Latency (ms)")
+        with gr.Row():
+            model_name = gr.Textbox(label="Model Name", interactive=False)
+            message = gr.Textbox(label="Message", interactive=False)
 
-            with gr.Row():
-                out_noise_type = gr.Textbox(label="Noise type", interactive=False)
-                out_snr_db = gr.Number(label="SNR (dB)", interactive=False)
-
-            contract_json = gr.Code(label="Backend JSON (contract)", language="json")
-
-        with gr.Tab("Results / About"):
-            gr.Markdown(build_about_markdown())
-            figures_dir = Path("results/figures")
-            if figures_dir.exists():
-                figure_files = sorted(list(figures_dir.glob("*.png")))[:4]
-                if figure_files:
-                    for fig in figure_files:
-                        gr.Image(value=str(fig), label=fig.name)
-                else:
-                    gr.Markdown("No PNG figures found yet in `results/figures`.")
-            else:
-                gr.Markdown("`results/figures` is not available yet.")
-
-        enroll_btn.click(
-            fn=enroll_speaker,
-            inputs=[speaker_name, enrollment_audio],
-            outputs=[enroll_status, verify_speaker_name],
-        )
-
-        refresh_btn.click(fn=refresh_speakers, inputs=None, outputs=verify_speaker_name)
-
-        verify_btn.click(
-            fn=verify_speaker,
-            inputs=[verify_speaker_name, test_audio, noise_type, snr_db, enhancement, threshold_mode],
+        verify_button.click(
+            fn=on_verify,
+            inputs=[enroll_audio, verification_audio, enhancement],
             outputs=[
-                decision_card,
+                status,
+                decision_badge,
+                decision_label,
                 score,
                 threshold,
-                decision_label,
                 latency_ms,
-                out_noise_type,
-                out_snr_db,
-                contract_json,
+                model_name,
+                message,
             ],
         )
 

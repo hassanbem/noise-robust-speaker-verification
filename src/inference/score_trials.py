@@ -9,11 +9,14 @@ from pathlib import Path
 from typing import Any
 
 from src.inference.constants import DEFAULT_CALIBRATION_PATH, DEFAULT_MODEL_CONFIG_PATH
-from src.inference.io import ensure_file_exists
+from src.inference.io import (
+    ensure_file_exists,
+    load_trials_csv,
+    parse_binary_label,
+    resolve_audio_path,
+)
 from src.inference.score_pair import resolve_threshold, score_pair_response
 from src.models.speechbrain_verifier import SpeechBrainVerifier
-
-REQUIRED_COLUMNS = {"enroll_path", "test_path"}
 
 
 def parse_args() -> argparse.Namespace:
@@ -58,46 +61,16 @@ def parse_args() -> argparse.Namespace:
         help="Optional max number of trials to score",
     )
     parser.add_argument(
+        "--enhancement",
+        action="store_true",
+        help="Set enhancement=true in output contract fields",
+    )
+    parser.add_argument(
         "--json-summary",
         action="store_true",
         help="Print summary as JSON instead of plain text",
     )
     return parser.parse_args()
-
-
-def _load_trials(trials_path: Path) -> tuple[list[dict[str, str]], list[str]]:
-    """Load trials CSV rows and validate required columns."""
-    ensure_file_exists(trials_path, "Trials CSV")
-    with trials_path.open("r", encoding="utf-8", newline="") as handle:
-        reader = csv.DictReader(handle)
-        if reader.fieldnames is None:
-            raise ValueError(f"Trials CSV has no header: {trials_path}")
-        missing = REQUIRED_COLUMNS - set(reader.fieldnames)
-        if missing:
-            raise ValueError(
-                f"Trials CSV missing required columns {sorted(missing)} in {trials_path}"
-            )
-        rows = [dict(row) for row in reader]
-        return rows, list(reader.fieldnames)
-
-
-def _resolve_audio_path(raw_path: str, trials_base_dir: Path) -> Path:
-    path = Path(raw_path)
-    if path.is_absolute():
-        return path
-    return (trials_base_dir / path).resolve()
-
-
-def _parse_optional_label(raw_label: str | None) -> bool | None:
-    """Map common label string variants to True/False when possible."""
-    if raw_label is None:
-        return None
-    value = raw_label.strip().lower()
-    if value in {"1", "true", "same", "same_speaker", "target", "yes"}:
-        return True
-    if value in {"0", "false", "different", "different_speaker", "nontarget", "no"}:
-        return False
-    return None
 
 
 def _write_scored_csv(
@@ -111,12 +84,16 @@ def _write_scored_csv(
         "decision",
         "decision_label",
         "latency_ms",
+        "model_name",
+        "sample_rate",
+        "enhancement",
         "threshold_mode",
+        "message",
     ]
     fieldnames = original_columns + [c for c in new_columns if c not in original_columns]
 
     with output_path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
 
@@ -125,8 +102,7 @@ def main() -> int:
     args = parse_args()
     ensure_file_exists(args.config, "Config")
 
-    trials_rows, original_columns = _load_trials(args.trials)
-    trials_base_dir = args.trials.parent.resolve()
+    trials_rows, original_columns, column_mapping = load_trials_csv(args.trials)
 
     verifier = SpeechBrainVerifier(config_path=args.config)
     threshold, threshold_mode = resolve_threshold(
@@ -142,8 +118,19 @@ def main() -> int:
         if args.limit is not None and idx >= args.limit:
             break
 
-        enroll_path = _resolve_audio_path(row["enroll_path"], trials_base_dir)
-        test_path = _resolve_audio_path(row["test_path"], trials_base_dir)
+        try:
+            enroll_path = resolve_audio_path(
+                row["enroll_path"],
+                trials_csv_path=args.trials,
+            )
+            test_path = resolve_audio_path(
+                row["test_path"],
+                trials_csv_path=args.trials,
+            )
+        except FileNotFoundError as exc:
+            raise FileNotFoundError(
+                f"Invalid trial row #{idx + 2} in {args.trials}.\n{exc}"
+            ) from exc
 
         response = score_pair_response(
             verifier=verifier,
@@ -152,6 +139,8 @@ def main() -> int:
             threshold=threshold,
             threshold_mode=threshold_mode,
         )
+        response["enhancement"] = bool(args.enhancement)
+        response["message"] = "verification completed successfully"
 
         scored_row = dict(row)
         scored_row.update(
@@ -161,21 +150,25 @@ def main() -> int:
                 "decision": response["decision"],
                 "decision_label": response["decision_label"],
                 "latency_ms": response["latency_ms"],
+                "model_name": response["model_name"],
+                "sample_rate": response["sample_rate"],
+                "enhancement": response["enhancement"],
                 "threshold_mode": response["threshold_mode"],
+                "message": response["message"],
             }
         )
         scored_rows.append(scored_row)
 
-        expected = _parse_optional_label(row.get("label"))
+        expected = parse_binary_label(row.get("label"))
         if expected is None:
             continue
         labeled_count += 1
         predicted = bool(response["decision"])
-        if predicted and expected:
+        if predicted and expected == 1:
             tp += 1
-        elif (not predicted) and (not expected):
+        elif (not predicted) and expected == 0:
             tn += 1
-        elif predicted and (not expected):
+        elif predicted and expected == 0:
             fp += 1
         else:
             fn += 1
@@ -190,6 +183,7 @@ def main() -> int:
         "threshold_mode": threshold_mode,
         "model_name": verifier.config.model_name,
         "sample_rate": verifier.config.sample_rate,
+        "column_mapping": column_mapping,
     }
     if labeled_count > 0:
         summary.update(
@@ -211,6 +205,7 @@ def main() -> int:
         print(f"Output: {args.output}")
         print(f"Scored trials: {len(scored_rows)}")
         print(f"Threshold ({threshold_mode}): {threshold:.4f}")
+        print(f"Column mapping: {column_mapping}")
         if labeled_count > 0:
             print(f"Labeled trials: {labeled_count}")
             print(f"Confusion counts: TP={tp} TN={tn} FP={fp} FN={fn}")

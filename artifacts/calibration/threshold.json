@@ -1,0 +1,17 @@
+{
+  "threshold_eer": 0.512439,
+  "threshold_far_1": 0.512439,
+  "selected_threshold": 0.512439,
+  "threshold": 0.512439,
+  "threshold_mode": "eer",
+  "eer": 0.0,
+  "far_target": 0.01,
+  "selected_far": 0.0,
+  "selected_frr": 0.0,
+  "num_trials": 32,
+  "num_positive": 16,
+  "num_negative": 16,
+  "scores_file": "results/scores/val_scores.csv",
+  "label_column": "label",
+  "score_column": "score"
+}

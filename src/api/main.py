@@ -9,6 +9,8 @@ from src.api.routes import router
 app = FastAPI(
     title="Noise-Robust Speaker Verification API",
     version="0.1.0",
-    description="Baseline verification API with ECAPA-TDNN and fixed thresholding.",
+    description=(
+        "Speaker verification API with ECAPA-TDNN and calibrated-threshold fallback."
+    ),
 )
 app.include_router(router)

@@ -34,6 +34,49 @@ pytest
 - UI should consume the response contract from `docs/api_contract.md`
 - Keep only tiny demo audio in `assets/demo_samples/`
 
+## Student 1 + Student 2 Integration Workflow
+
+### 1. Ensure manifest paths are portable
+- Manifests under `data/manifests/` should store relative paths such as:
+  - `data/processed/spk001/verify_clean_01.wav`
+- Avoid machine-specific absolute paths like `C:\...` or `/home/...`.
+
+### 2. Batch score validation trials
+```bash
+python -m src.inference.score_trials \
+  --trials data/manifests/trials_val.csv \
+  --output results/scores/val_scores.csv
+```
+
+### 3. Calibrate threshold on validation scores
+```bash
+python -m src.inference.calibrate_threshold \
+  --scores results/scores/val_scores.csv \
+  --output artifacts/calibration/threshold.json
+```
+
+### 4. Batch score test trials
+```bash
+python -m src.inference.score_trials \
+  --trials data/manifests/trials_test.csv \
+  --output results/scores/test_scores.csv
+```
+
+### 5. Evaluate scored test set (+ noise ablations when columns exist)
+```bash
+python -m src.eval.evaluate_scores \
+  --scores results/scores/test_scores.csv \
+  --output-dir results/eval
+```
+
+Outputs produced by evaluation:
+- `results/eval/*_summary.json`
+- `results/eval/*_summary.csv`
+- `results/eval/*_roc.png`
+- `results/eval/*_det.png`
+- `results/ablation/noise_ablation.csv` (if `noise_type` and/or `snr_db` columns exist)
+- `results/tables/noise_type_summary.csv` and `results/tables/snr_db_summary.csv` (when available)
+
 ## Workflow
 - Keep `main` clean and protected when possible.
 - Use one feature branch per student after this scaffold commit.

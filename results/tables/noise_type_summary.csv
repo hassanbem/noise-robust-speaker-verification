@@ -1,0 +1,2 @@
+noise_type,num_trials,num_positive,num_negative,threshold_mode,threshold,eer,eer_threshold,accuracy,far,frr,tp,tn,fp,fn
+clean,32,16,16,eer,0.512439,0.0,0.586776,1.0,0.0,0.0,16,16,0,0

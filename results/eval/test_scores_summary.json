@@ -1,0 +1,21 @@
+{
+  "scores_file": "results/scores/test_scores.csv",
+  "num_trials": 32,
+  "num_positive": 16,
+  "num_negative": 16,
+  "label_column": "label",
+  "score_column": "score",
+  "threshold_mode": "eer",
+  "selected_threshold": 0.512439,
+  "eer": 0.0,
+  "threshold_eer": 0.586776,
+  "accuracy": 1.0,
+  "far": 0.0,
+  "frr": 0.0,
+  "tp": 16,
+  "tn": 16,
+  "fp": 0,
+  "fn": 0,
+  "far_target": 0.01,
+  "threshold_far_1": 0.586776
+}
